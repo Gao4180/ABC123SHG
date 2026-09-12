@@ -16,8 +16,8 @@ import optimizer as opt
 from data_loader import annualized_stats, load_config, pool_meta, portfolio_nav
 from report import (
     RF, auto_analysis, benchmark_nav, factor_section, load_with_progress,
-    market_views_section, mc_fan_chart, nav_chart, pie_chart,
-    portfolio_summary_row, risk_contribution_section, timing_section,
+    mc_fan_chart, nav_chart, pie_chart, portfolio_summary_row,
+    risk_contribution_section, timing_section,
 )
 
 PLAN_META = {
@@ -197,11 +197,10 @@ def render():
             st.caption(PLAN_META[plan_name]["人群"])
             st.caption(PLAN_META[plan_name]["风险"])
 
-            with st.expander("📊 这套方案的风险从哪来（风险归因 + 风格暴露 + 机构观点）"):
+            with st.expander("📊 这套方案的风险从哪来（风险归因 + 风格暴露）"):
                 risk_contribution_section(tickers, w, cov, names=names,
                                           key_prefix=f"m2_{plan_name}")
                 factor_section(prices, w, market, key_prefix=f"m2_{plan_name}")
-                market_views_section(cfg)
 
         row = portfolio_summary_row(plan_name, prices, w)
         row["未来1年正收益概率"] = f"{prob:.0%}"

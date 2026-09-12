@@ -381,22 +381,3 @@ def timing_section(prices, weights, label, names=None, cash_ticker="SHV",
     if not logs.empty:
         with st.expander("查看最近几次调仓记录"):
             st.dataframe(logs, width="stretch", hide_index=True)
-
-
-def market_views_section(cfg=None):
-    """
-    主流机构观点快照（人工整理，存于 config.yaml 的 market_views）。
-    投行研报没有免费实时数据源，这里用"定期人工更新的快照"折中：
-    价值在于给风险归因一个参照系——你的风险集中在哪，机构对该资产的分歧是什么。
-    """
-    if cfg is None:
-        cfg = load_config()
-    views = cfg.get("market_views") or {}
-    items = views.get("items") or []
-    if not items:
-        return
-    with st.expander("🌐 主流机构观点快照（对照你的风险归因看）"):
-        st.caption(f"整理时间：{views.get('updated', '未知')}。"
-                   "来源为公开报道的各投行展望，仅供学习参考，非实时数据、不构成投资建议。")
-        for it in items:
-            st.markdown(f"- {it}")
