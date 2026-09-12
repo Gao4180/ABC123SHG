@@ -199,13 +199,18 @@ def factor_section(prices, weights, market, key_prefix="fx"):
         st.caption("因子代理数据暂不可用，跳过风格暴露分析。")
         return
     st.markdown("**风格暴露：组合收益由哪些风格驱动**（因子代理回归）")
-    fprices = pd.concat(series, axis=1).sort_index().ffill(limit=5).dropna()
-    frets = fprices.pct_change().dropna()
+    # 对齐方式：把因子净值重索引到组合交易日再前向填充（而非取交集），
+    # 避免某个因子缺数据时重叠期被掏空导致"重叠区间太短"
+    fprices = pd.concat(series, axis=1).sort_index()
+    fprices = fprices.reindex(prices.index).ffill()
+    frets = fprices.pct_change()
     port_rets = (prices.pct_change().dropna()
                  * np.asarray(weights, dtype=float)).sum(axis=1)
+    overlap = pd.concat([port_rets.rename("y"), frets], axis=1).dropna().shape[0]
     df, r2 = analytics.factor_exposure(port_rets, frets)
     if df.empty:
-        st.caption("因子数据与组合的重叠区间太短，无法回归，跳过。")
+        st.caption(f"因子数据与组合的重叠区间太短（{overlap} 个交易日 < 60），"
+                   "无法回归，跳过。这通常是因子指数拉取不完整，刷新重试即可。")
         return
     st.plotly_chart(go.Figure(go.Bar(
         x=df["因子"], y=df["暴露β"],
@@ -376,3 +381,22 @@ def timing_section(prices, weights, label, names=None, cash_ticker="SHV",
     if not logs.empty:
         with st.expander("查看最近几次调仓记录"):
             st.dataframe(logs, width="stretch", hide_index=True)
+
+
+def market_views_section(cfg=None):
+    """
+    主流机构观点快照（人工整理，存于 config.yaml 的 market_views）。
+    投行研报没有免费实时数据源，这里用"定期人工更新的快照"折中：
+    价值在于给风险归因一个参照系——你的风险集中在哪，机构对该资产的分歧是什么。
+    """
+    if cfg is None:
+        cfg = load_config()
+    views = cfg.get("market_views") or {}
+    items = views.get("items") or []
+    if not items:
+        return
+    with st.expander("🌐 主流机构观点快照（对照你的风险归因看）"):
+        st.caption(f"整理时间：{views.get('updated', '未知')}。"
+                   "来源为公开报道的各投行展望，仅供学习参考，非实时数据、不构成投资建议。")
+        for it in items:
+            st.markdown(f"- {it}")

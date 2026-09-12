@@ -127,6 +127,19 @@ assert any("目标达成概率" in (m.label or "") for m in at3.metric)
 caps3 = " ".join(c.value or "" for c in at3.caption)
 assert "下滑轨道" in caps3
 
+print("\n== 模式三回归：目标类型驱动配置差异 + 同名目标不崩溃 ==")
+# 再加一个「购房首付」目标，期限改 5 年 → 股票占比应与「退休养老」不同
+sb3 = next(s for s in at3.selectbox if s.label == "目标类型")
+sb3.set_value("购房首付")
+ni3 = next(n for n in at3.number_input if "距目标期限" in (n.label or ""))
+ni3.set_value(5.0)
+_click_submit(at3, "添加目标")
+assert not at3.exception, at3.exception
+subs3b = [s.value for s in at3.subheader]
+assert any("购房首付" in s for s in subs3b), "目标类型应体现在目标名称里"
+eq_vals = [m.value for m in at3.metric if "股票占比" in (m.label or "")]
+assert len(set(eq_vals)) >= 2, f"不同目标类型的股票占比应不同，实际: {eq_vals}"
+
 print("\n== KYC 适当性提示：C2 客户输入含 R3+ 产品的组合（只警示不剔除，照常分析） ==")
 at4 = AppTest.from_file("app.py", default_timeout=180)
 at4.run()

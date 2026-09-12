@@ -22,8 +22,8 @@ import timing
 from data_loader import load_config, pool_meta, portfolio_nav, annualized_stats
 from report import (
     RF, amount_table, asset_metrics_table, auto_analysis, benchmark_nav,
-    factor_section, load_with_progress, mc_fan_chart, nav_chart, pie_chart,
-    risk_contribution_section, timing_section,
+    factor_section, load_with_progress, market_views_section, mc_fan_chart,
+    nav_chart, pie_chart, risk_contribution_section, timing_section,
 )
 
 RISK_MODES = {
@@ -263,11 +263,12 @@ def render():
     st.write(auto_analysis(list(prices.columns), weights, prices, mu, cov,
                            label=f"{ctx['risk_label'].split('（')[0]}档组合"))
 
-    # ---------- 风险归因 + 风格暴露 ----------
+    # ---------- 风险归因 + 风格暴露 + 机构观点快照 ----------
     names = {t: meta.get(t, {}).get("name", t) for t in prices.columns}
     risk_contribution_section(list(prices.columns), weights, cov,
                               names=names, key_prefix="m1")
     factor_section(prices, weights, majority_mkt, key_prefix="m1")
+    market_views_section(cfg)
 
     # ---------- 再平衡提醒（机构纪律：偏离 >5% 触发） ----------
     with st.expander("⚖️ 再平衡检查：输入你当前的实际持仓比例"):
