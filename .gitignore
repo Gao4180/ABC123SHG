@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
 .streamlit/secrets.toml
+.ssh_deploy_key
+.ssh_deploy_key.pub
 .smoke_*
 dev.bat
 run_dev.py
