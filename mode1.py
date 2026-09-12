@@ -21,12 +21,14 @@ import optimizer as opt
 import timing
 from data_loader import load_config, pool_meta, portfolio_nav, annualized_stats
 from report import (
-    RF, amount_table, asset_metrics_table, auto_analysis,
-    load_with_progress, mc_fan_chart, nav_chart, pie_chart, timing_section,
+    RF, amount_table, asset_metrics_table, auto_analysis, benchmark_nav,
+    factor_section, load_with_progress, mc_fan_chart, nav_chart, pie_chart,
+    risk_contribution_section, timing_section,
 )
 
 RISK_MODES = {
     "保守（最小方差）": "min_var",
+    "分散（HRP 层级风险平价）": "hrp",
     "平衡（最大夏普）": "max_sharpe",
     "激进（波动≤25%下收益最大）": "max_ret",
 }
@@ -220,6 +222,8 @@ def render():
     mode = RISK_MODES[ctx["risk_label"]]
     if mode == "min_var":
         weights = opt.min_variance(mu, cov, cap=cap)
+    elif mode == "hrp":
+        weights = opt.hrp(cov, cap=cap)
     elif mode == "max_sharpe":
         weights = opt.max_sharpe(mu, cov, rf=RF, cap=cap)
     else:
@@ -241,17 +245,29 @@ def render():
     with col_pie:
         st.plotly_chart(pie_chart(prices.columns, weights), width="stretch")
     with col_nav:
+        # 基准：按持仓多数市场选择沪深300或标普500
+        mkt_counts = pd.Series([markets.get(t) for t in prices.columns]
+                               ).value_counts()
+        majority_mkt = mkt_counts.index[0] if len(mkt_counts) else "美股"
+        bench = benchmark_nav(prices.index, majority_mkt)
         nav_opt = portfolio_nav(prices, weights)
         n_assets = len(prices.columns)
         nav_eq = portfolio_nav(prices, np.full(n_assets, 1 / n_assets))
         st.plotly_chart(
             nav_chart({"优化组合": nav_opt, "等权组合": nav_eq},
-                      title="组合累计净值 vs 等权组合（近5年）"),
+                      title="组合累计净值 vs 等权组合 vs 市场基准（近5年）",
+                      benchmark=bench),
             width="stretch")
 
     st.subheader("自动分析")
     st.write(auto_analysis(list(prices.columns), weights, prices, mu, cov,
                            label=f"{ctx['risk_label'].split('（')[0]}档组合"))
+
+    # ---------- 风险归因 + 风格暴露 ----------
+    names = {t: meta.get(t, {}).get("name", t) for t in prices.columns}
+    risk_contribution_section(list(prices.columns), weights, cov,
+                              names=names, key_prefix="m1")
+    factor_section(prices, weights, majority_mkt, key_prefix="m1")
 
     # ---------- 再平衡提醒（机构纪律：偏离 >5% 触发） ----------
     with st.expander("⚖️ 再平衡检查：输入你当前的实际持仓比例"):

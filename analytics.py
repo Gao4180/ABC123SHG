@@ -135,3 +135,64 @@ def data_quality_report(raw: pd.DataFrame, aligned: pd.DataFrame,
                 warns.append(f"{t} 检出 {jumps} 次超过 {jump_sigma:.0f}σ 的单日剧烈波动，"
                              "可能是真实极端行情，也可能是数据源脏数据")
     return warns
+
+
+# ---------- 风险贡献分解（风险归因） ----------
+
+def risk_contribution(cov, weights, tickers):
+    """
+    把组合总波动分解到每个资产：
+    边际风险贡献 MCTR_i = (Σw)_i / σp，风险贡献 CTR_i = w_i · MCTR_i，
+    占比 CTR_i / σp（合计 = 100%）。
+    专业机构看的是风险预算而非资金比例——60/40 股债组合约九成风险来自股票。
+    返回 (DataFrame[资产/资金占比/风险贡献占比/边际风险贡献], 组合年化波动)。
+    """
+    w = np.asarray(weights, dtype=float)
+    cov = np.asarray(cov, dtype=float)
+    if w.sum() <= 0:
+        return pd.DataFrame(), 0.0
+    w = w / w.sum()
+    vol = float(np.sqrt(max(w @ cov @ w, 0.0)))
+    if vol <= 1e-12:
+        return pd.DataFrame(), vol
+    mctr = (cov @ w) / vol
+    pct = w * mctr / vol
+    df = pd.DataFrame({"资产": list(tickers), "资金占比": w,
+                       "风险贡献占比": pct, "边际风险贡献": mctr})
+    return (df.sort_values("风险贡献占比", ascending=False)
+              .reset_index(drop=True), vol)
+
+
+# ---------- 风格/因子暴露（可投资代理回归） ----------
+
+# 用可投资的指数/ETF 代表风格因子（Fama-French 思路的可投资化近似）：
+# 因子数据本身难以免费获取，代理回归是投顾行业的常见折中做法。
+FACTOR_PROXIES = {
+    "美股": [("SPY", "大盘市场"), ("IWM", "小盘股"), ("QQQ", "科技成长"),
+             ("TLT", "长久期债券"), ("GLD", "黄金")],
+    "A股": [("000300.SS", "大盘蓝筹"), ("000905.SS", "中小盘"),
+            ("399006.SZ", "创业板成长"), ("511010.SS", "利率债")],
+}
+
+
+def factor_exposure(port_rets: pd.Series, factor_rets: pd.DataFrame):
+    """
+    组合日收益对因子代理日收益的多元线性回归（OLS，含截距）。
+    返回 (DataFrame[因子/暴露β], R²)。
+    β 解读：该因子涨 1%，组合平均跟随变动 β%（β<0 为反向暴露）。
+    """
+    if factor_rets is None or factor_rets.shape[1] == 0:
+        return pd.DataFrame(), np.nan
+    df = pd.concat([port_rets.rename("y"), factor_rets], axis=1).dropna()
+    if len(df) < 60:
+        return pd.DataFrame(), np.nan
+    y = df["y"].values
+    X = df.drop(columns="y").values
+    X1 = np.column_stack([np.ones(len(X)), X])
+    beta, *_ = np.linalg.lstsq(X1, y, rcond=None)
+    yhat = X1 @ beta
+    ss_res = float(((y - yhat) ** 2).sum())
+    ss_tot = float(((y - y.mean()) ** 2).sum())
+    r2 = 1 - ss_res / ss_tot if ss_tot > 1e-18 else np.nan
+    out = pd.DataFrame({"因子": list(factor_rets.columns), "暴露β": beta[1:]})
+    return out, float(r2) if np.isfinite(r2) else np.nan

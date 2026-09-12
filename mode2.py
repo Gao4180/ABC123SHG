@@ -15,8 +15,9 @@ import kyc
 import optimizer as opt
 from data_loader import annualized_stats, load_config, pool_meta, portfolio_nav
 from report import (
-    RF, auto_analysis, load_with_progress, mc_fan_chart,
-    nav_chart, pie_chart, portfolio_summary_row, timing_section,
+    RF, auto_analysis, benchmark_nav, factor_section, load_with_progress,
+    mc_fan_chart, nav_chart, pie_chart, portfolio_summary_row,
+    risk_contribution_section, timing_section,
 )
 
 PLAN_META = {
@@ -35,6 +36,10 @@ PLAN_META = {
     "方案D · 积极增长型": {
         "人群": "适合人群：风险承受能力高、投资期限长、追求资本增值的激进投资者。",
         "风险": "主要风险：股票占比高，熊市可能出现 30% 以上的回撤，需长期持有消化。",
+    },
+    "方案E · HRP层级风险平价": {
+        "人群": "适合人群：不信任收益预测、希望配置结果对参数误差不敏感的稳健型投资者。",
+        "风险": "主要风险：完全不参考预期收益，强趋势行情中可能跑输均值-方差方案。",
     },
 }
 
@@ -58,6 +63,7 @@ def _build_plans(mu, cov, tickers, meta, cap=0.4):
     if eq:
         plans["方案D · 积极增长型"] = opt.optimize_plan_D(
             mu, cov, eq, rf=RF, cap=cap, eq_floor=0.5)
+    plans["方案E · HRP层级风险平价"] = opt.hrp(cov, cap=cap)
     return plans
 
 
@@ -70,7 +76,7 @@ def render():
                           rules=kyc.LEVEL_RULES[kyc_result["level"]])
 
     st.header("模式二 · 财富方案推荐")
-    st.caption("自动生成 4 套经典方案并对比。资产池、风险等级、费率均可在 config.yaml 中修改。")
+    st.caption("自动生成 5 套方案并对比（含 HRP 层级风险平价）。资产池、风险等级、费率均可在 config.yaml 中修改。")
 
     pool_choice = st.radio("选择资产池", ["国内 ETF/QDII 池（人民币可买）",
                                         "美股 ETF 池（需美元账户）"],
@@ -143,6 +149,8 @@ def render():
     plans = _build_plans(mu, cov, tickers, meta_all, cap=cap)
 
     # ---------- 逐套方案展示 ----------
+    market = "A股" if "国内" in pool_choice else "美股"
+    bench = benchmark_nav(prices.index, market)
     navs = {}
     summary_rows = []
     stress_frames = []
@@ -167,7 +175,8 @@ def render():
                 nav = portfolio_nav(prices, w)
                 navs[plan_name] = nav
                 st.plotly_chart(nav_chart({plan_name: nav},
-                                          title=f"{plan_name} 净值（近5年）"),
+                                          title=f"{plan_name} 净值 vs 基准（近5年）",
+                                          benchmark=bench),
                                 width="stretch", key=f"nav_{plan_name}")
 
             # 蒙特卡洛前景（自助法，含肥尾）
@@ -188,6 +197,11 @@ def render():
             st.caption(PLAN_META[plan_name]["人群"])
             st.caption(PLAN_META[plan_name]["风险"])
 
+            with st.expander("📊 这套方案的风险从哪来（风险归因 + 风格暴露）"):
+                risk_contribution_section(tickers, w, cov, names=names,
+                                          key_prefix=f"m2_{plan_name}")
+                factor_section(prices, w, market, key_prefix=f"m2_{plan_name}")
+
         row = portfolio_summary_row(plan_name, prices, w)
         row["未来1年正收益概率"] = f"{prob:.0%}"
         summary_rows.append(row)
@@ -197,16 +211,17 @@ def render():
             st_df.insert(0, "方案", plan_name)
             stress_frames.append(st_df)
 
-    # ---------- 四套方案横向对比 ----------
-    st.subheader("四套方案净值对比（近5年）")
-    st.plotly_chart(nav_chart(navs, title="方案 A / B / C / D 累计净值对比"),
+    # ---------- 五套方案横向对比 ----------
+    st.subheader("五套方案净值对比（近5年）")
+    st.plotly_chart(nav_chart(navs, title="方案 A / B / C / D / E 累计净值对比",
+                              benchmark=bench),
                     width="stretch")
 
-    st.subheader("四套方案指标横向对比")
+    st.subheader("五套方案指标横向对比")
     st.dataframe(pd.DataFrame(summary_rows), width="stretch", hide_index=True)
 
     # ---------- 压力测试对比 ----------
-    st.subheader("压力测试：如果历史极端行情重演，四套方案分别跌多少")
+    st.subheader("压力测试：如果历史极端行情重演，五套方案分别跌多少")
     if stress_frames:
         all_stress = pd.concat(stress_frames, ignore_index=True)
         st.dataframe(all_stress, width="stretch", hide_index=True)

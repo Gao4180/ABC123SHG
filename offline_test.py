@@ -141,8 +141,8 @@ lv, note = kyc.horizon_rule(1.5, 5)
 assert lv == 2 and note is not None
 lv, note = kyc.horizon_rule(12, 5)
 assert lv == 5 and note is None
-assert kyc.allowed_modes(2) == ["min_var"]
-assert set(kyc.allowed_modes(5)) == {"min_var", "max_sharpe", "max_ret"}
+assert kyc.allowed_modes(2) == ["min_var", "hrp"]
+assert set(kyc.allowed_modes(5)) == {"min_var", "hrp", "max_sharpe", "max_ret"}
 
 mu_bl = opt.black_litterman(mu, cov, list(prices.columns), {"SPY", "QQQ"},
                             rf=RF, tau=0.05, view_shrink=0.5)
@@ -178,5 +178,28 @@ assert normalize_ticker("159915") == "159915.SZ"
 assert normalize_ticker("spy") == "SPY"
 assert normalize_ticker(" 601318 ") == "601318.SS"
 print("normalize_ticker ✔")
+
+print("\n== 9. HRP / 风险归因 / 因子暴露 / 基准叠加 ==")
+w_hrp = opt.hrp(cov, cap=0.4)
+assert abs(w_hrp.sum() - 1) < 1e-6 and w_hrp.min() >= -1e-9 and w_hrp.max() <= 0.401
+r, v, s, m = annualized_stats(prices, w_hrp, rf=RF)
+print(f"HRP: 收益={r:.1%} 波动={v:.1%} 夏普={s:.2f} 回撤={m:.1%} 权重上限={w_hrp.max():.2f}")
+# 单资产边界
+assert opt.hrp(cov[:1, :1])[0] == 1.0
+
+rc_df, rc_vol = analytics.risk_contribution(cov, w_hrp, list(prices.columns))
+assert abs(rc_df["风险贡献占比"].sum() - 1) < 1e-6, "风险贡献占比合计应为 100%"
+assert abs(rc_df["资金占比"].sum() - 1) < 1e-6
+print("风险归因 Top3:", rc_df.head(3)[["资产", "风险贡献占比"]].to_dict("records"))
+
+frets = prices[["SPY", "QQQ", "GLD", "TLT"]].pct_change().dropna()
+fx_df, r2 = analytics.factor_exposure(port_rets, frets)
+assert not fx_df.empty and 0 <= r2 <= 1.001 and len(fx_df) == 4
+print(f"因子暴露: R²={r2:.2f}", fx_df.to_dict("records"))
+
+bench_nav = prices["SPY"] / prices["SPY"].iloc[0]
+fig5 = nav_chart({"C": data_loader.portfolio_nav(prices, w_hrp)},
+                 benchmark=("标普500（SPY）", bench_nav))
+assert len(fig5.data) == 2, "基准应作为灰色虚线叠加"
 
 print("\n离线全链路验证通过 ✔")

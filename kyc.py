@@ -55,8 +55,9 @@ LEVEL_RULES = {
         "label": "C5 激进型", "desc": "可配高波动成长资产，追求长期资本增值"},
 }
 
-_MODE_ORDER = {"min_var": 0, "max_sharpe": 1, "max_ret": 2}
-MODE_LABELS = {"min_var": "保守（最小方差）", "max_sharpe": "平衡（最大夏普）",
+_MODE_ORDER = {"min_var": 0, "hrp": 0, "max_sharpe": 1, "max_ret": 2}
+MODE_LABELS = {"min_var": "保守（最小方差）", "hrp": "分散（HRP 层级风险平价）",
+               "max_sharpe": "平衡（最大夏普）",
                "max_ret": "激进（波动≤25%下收益最大）"}
 
 

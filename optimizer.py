@@ -146,6 +146,65 @@ def risk_parity(cov, cap=1.0):
     return _solve(obj, n, cons, bounds)
 
 
+def hrp(cov, cap=1.0):
+    """
+    层级风险平价（Hierarchical Risk Parity，López de Prado 2016）。
+    与马科维茨不同：不需要预期收益、不做协方差矩阵求逆，
+    对参数估计误差不敏感，样本外表现通常更稳。三步：
+    1) 相关矩阵 → 距离矩阵 → 层次聚类（树状图）
+    2) 准对角化：按聚类叶序重排资产，相似的资产相邻
+    3) 递归二分：簇间按"簇方差的反比"分配权重，簇内继续二分
+    """
+    from scipy.cluster.hierarchy import leaves_list, linkage
+    from scipy.spatial.distance import squareform
+
+    cov = np.asarray(cov, dtype=float)
+    n = cov.shape[0]
+    if n == 1:
+        return np.array([1.0])
+    vols = np.sqrt(np.clip(np.diag(cov), 1e-12, None))
+    corr = np.clip(cov / np.outer(vols, vols), -1.0, 1.0)
+    dist = np.sqrt(np.clip(0.5 * (1.0 - corr), 0.0, None))
+    np.fill_diagonal(dist, 0.0)
+    order = list(leaves_list(linkage(squareform(dist, checks=False),
+                                     method="single")))
+
+    def cluster_var(idx):
+        """簇内用逆方差权重求簇方差。"""
+        sub = cov[np.ix_(idx, idx)]
+        ivp = 1.0 / np.clip(np.diag(sub), 1e-12, None)
+        ivp = ivp / ivp.sum()
+        return float(ivp @ sub @ ivp)
+
+    w = np.ones(n)
+    clusters = [order]
+    while clusters:
+        cluster = clusters.pop(0)
+        if len(cluster) < 2:
+            continue
+        mid = len(cluster) // 2
+        left, right = cluster[:mid], cluster[mid:]
+        var_l, var_r = cluster_var(left), cluster_var(right)
+        alpha = 1.0 - var_l / max(var_l + var_r, 1e-18)
+        w[left] *= alpha
+        w[right] *= 1.0 - alpha
+        clusters.extend([left, right])
+    w = w / w.sum()
+    # 迭代"灌水式"施加上限：超上限的资产钉在 cap，余额按比例分配给未超限资产
+    for _ in range(20):
+        over = w > cap
+        if not over.any():
+            break
+        excess = float((w[over] - cap).sum())
+        w[over] = cap
+        under = ~over
+        if not under.any() or w[under].sum() <= 0:
+            break
+        w[under] += excess * w[under] / w[under].sum()
+    s = w.sum()
+    return w / s if s > 0 else np.full(n, 1.0 / n)
+
+
 def optimize_plan_A(mu, cov, defensive_idx, vol_limit=0.05, cap=0.4):
     """
     方案A「稳健保本型」：在波动 ≤ vol_limit 的约束下，最大化债券+现金类资产占比。

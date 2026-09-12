@@ -14,10 +14,11 @@ rng = np.random.default_rng(3)
 dates = pd.bdate_range("2021-09-01", "2026-09-10")
 params = {"GLD": (.08, .15), "BND": (.02, .05), "TLT": (-.01, .13), "SPY": (.12, .17),
           "QQQ": (.16, .24), "DBC": (.05, .18), "QAI": (.04, .06), "HDG": (.03, .07),
-          "SHV": (.02, .01), "AAPL": (.2, .28),
+          "SHV": (.02, .01), "AAPL": (.2, .28), "IWM": (.07, .20),
           "511880.SS": (.015, .005), "511010.SS": (.02, .02), "518880.SS": (.09, .14),
           "510880.SS": (.07, .15), "510300.SS": (.06, .18), "513500.SS": (.11, .17),
-          "159915.SZ": (.10, .26), "513100.SS": (.15, .25)}
+          "159915.SZ": (.10, .26), "513100.SS": (.15, .25),
+          "000300.SS": (.05, .17), "000905.SS": (.06, .21), "399006.SZ": (.09, .27)}
 cols = {t: pd.Series(100 * np.cumprod(1 + m / 252 + v / np.sqrt(252) * rng.standard_normal(len(dates))),
                      index=dates, name=t) for t, (m, v) in params.items()}
 data_loader.fetch_close_batch = lambda ts: {t.strip().upper(): cols[t.strip().upper()] for t in ts if t.strip().upper() in cols}
@@ -54,6 +55,10 @@ print("小节:", subheaders)
 assert any("自动分析" in s for s in subheaders)
 assert any("蒙特卡洛" in s for s in subheaders) and any("压力测试" in s for s in subheaders)
 assert any("择时信号" in s for s in subheaders) and any("动态配置回测" in s for s in subheaders)
+# 新增：风险归因 + 风格暴露（因子代理回归）
+mks = " ".join(m.value or "" for m in at.markdown)
+assert "风险归因" in mks, "模式一应有风险归因区块"
+assert "风格暴露" in mks or "因子代理数据暂不可用" in " ".join(c.value or "" for c in at.caption)
 
 print("\n== 回归：交互后不闪退（滑块/勾选/改假设触发重跑，结果仍在） ==")
 # 拖动微调滑块 → 重跑 → 优化结果区块必须还在
@@ -93,6 +98,8 @@ assert not at2.exception, at2.exception
 subs = [s.value for s in at2.subheader]
 print("小节:", subs)
 assert any("方案A" in s for s in subs) and any("方案D" in s for s in subs)
+assert any("方案E" in s for s in subs), "应新增 HRP 方案E"
+assert any("五套方案" in s for s in subs)
 assert any("横向对比" in s for s in subs)
 assert any("压力测试" in s for s in subs)
 assert any("择时信号" in s for s in subs) and any("动态配置回测" in s for s in subs)

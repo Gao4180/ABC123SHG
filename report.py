@@ -110,12 +110,20 @@ def pie_chart(tickers, weights):
     return fig
 
 
-def nav_chart(navs: dict[str, pd.Series], title="累计净值走势（近5年）"):
-    """多条净值曲线对比，hover 可见每日数值。"""
+def nav_chart(navs: dict[str, pd.Series], title="累计净值走势（近5年）",
+              benchmark: tuple[str, pd.Series] | None = None):
+    """多条净值曲线对比，hover 可见每日数值；可叠加市场基准（灰色虚线）。"""
     fig = go.Figure()
     for name, nav in navs.items():
         fig.add_trace(go.Scatter(
             x=nav.index, y=nav.values, name=name, mode="lines",
+            hovertemplate="%{x|%Y-%m-%d}<br>净值 %{y:.3f}<extra>%{fullData.name}</extra>",
+        ))
+    if benchmark is not None:
+        bname, bnav = benchmark
+        fig.add_trace(go.Scatter(
+            x=bnav.index, y=bnav.values, name=f"基准：{bname}", mode="lines",
+            line=dict(color="gray", dash="dash", width=1.5),
             hovertemplate="%{x|%Y-%m-%d}<br>净值 %{y:.3f}<extra>%{fullData.name}</extra>",
         ))
     fig.update_layout(margin=dict(l=10, r=10, t=40, b=10), height=420,
@@ -123,6 +131,98 @@ def nav_chart(navs: dict[str, pd.Series], title="累计净值走势（近5年）
                       yaxis_title="累计净值（起点=1）",
                       legend=dict(orientation="h", y=-0.15))
     return fig
+
+
+def benchmark_nav(dates, market: str):
+    """
+    拉取市场基准净值（A股→沪深300，美股→标普500 ETF SPY），
+    与组合日期对齐并归一到起点 1。失败返回 None（静默降级，不影响主流程）。
+    """
+    from data_loader import fetch_close_batch   # 延迟导入：测试打桩可生效
+    ticker, label = ("000300.SS", "沪深300") if market == "A股" \
+        else ("SPY", "标普500")
+    try:
+        s = fetch_close_batch((ticker,)).get(ticker)
+        if s is None or s.empty:
+            return None
+        s = s.reindex(dates).ffill().dropna()
+        if len(s) < 30:
+            return None
+        return (f"{label}（{ticker}）", s / s.iloc[0])
+    except Exception:
+        return None
+
+
+def risk_contribution_section(tickers, weights, cov, names=None, key_prefix="rc"):
+    """风险归因区块：资金占比 vs 风险贡献占比 对比柱状图 + 一句人话解读。"""
+    import analytics
+    df, _vol = analytics.risk_contribution(cov, weights, list(tickers))
+    if df.empty:
+        return
+    st.markdown("**风险归因：每个资产贡献了多少风险**")
+    labels = [f"{names.get(t, t)}（{t}）" if names else t for t in df["资产"]]
+    fig = go.Figure()
+    fig.add_bar(name="资金占比", x=labels, y=df["资金占比"],
+                marker_color="#9DB2D5",
+                hovertemplate="%{x}<br>资金占比 %{y:.1%}<extra></extra>")
+    fig.add_bar(name="风险贡献占比", x=labels, y=df["风险贡献占比"],
+                marker_color="#C00000",
+                hovertemplate="%{x}<br>风险贡献 %{y:.1%}<extra></extra>")
+    fig.update_layout(barmode="group", height=320,
+                      margin=dict(l=10, r=10, t=20, b=10),
+                      yaxis_tickformat=".0%",
+                      legend=dict(orientation="h", y=-0.2))
+    st.plotly_chart(fig, width="stretch", key=f"{key_prefix}_rc")
+    top = df.iloc[0]
+    tname = names.get(top["资产"], top["资产"]) if names else top["资产"]
+    extra = "，是组合最主要的风险来源" if top["风险贡献占比"] - top["资金占比"] > 0.1 else ""
+    st.caption(
+        f"💡 {tname} 占资金 {top['资金占比']:.0%}，却贡献了组合 {top['风险贡献占比']:.0%} "
+        f"的波动{extra}。专业配置看的是风险预算而不仅是资金比例："
+        "典型的 60/40 股债组合，约九成风险其实来自股票。")
+
+
+def factor_section(prices, weights, market, key_prefix="fx"):
+    """风格/因子暴露区块：组合日收益对可投资风格代理的回归 β + R²。"""
+    import analytics
+    from data_loader import fetch_close_batch   # 延迟导入：测试打桩可生效
+    proxies = analytics.FACTOR_PROXIES.get(
+        market, analytics.FACTOR_PROXIES["美股"])
+    fname = dict(proxies)
+    try:
+        data = fetch_close_batch(tuple(fname.keys()))
+    except Exception:
+        data = {}
+    series = {fname[t]: s for t, s in data.items()
+              if s is not None and not s.empty}
+    if len(series) < 2:
+        st.caption("因子代理数据暂不可用，跳过风格暴露分析。")
+        return
+    st.markdown("**风格暴露：组合收益由哪些风格驱动**（因子代理回归）")
+    fprices = pd.concat(series, axis=1).sort_index().ffill(limit=5).dropna()
+    frets = fprices.pct_change().dropna()
+    port_rets = (prices.pct_change().dropna()
+                 * np.asarray(weights, dtype=float)).sum(axis=1)
+    df, r2 = analytics.factor_exposure(port_rets, frets)
+    if df.empty:
+        st.caption("因子数据与组合的重叠区间太短，无法回归，跳过。")
+        return
+    st.plotly_chart(go.Figure(go.Bar(
+        x=df["因子"], y=df["暴露β"],
+        marker_color=["#C00000" if b < 0 else "#4472C4" for b in df["暴露β"]],
+        hovertemplate="%{x} β=%{y:.2f}<extra></extra>",
+    )).update_layout(height=300, margin=dict(l=10, r=10, t=20, b=10),
+                     yaxis_title="暴露 β"),
+        width="stretch", key=f"{key_prefix}_fx")
+    top = df.loc[df["暴露β"].abs().idxmax()]
+    r2_txt = f"{r2:.0%}" if np.isfinite(r2) else "未知"
+    st.caption(
+        f"解读：组合波动约 {r2_txt} 可由上述风格因子解释；"
+        f"暴露最高的是「{top['因子']}」（β={top['暴露β']:.2f}）——该因子涨 1%，"
+        f"组合平均跟{'涨' if top['暴露β'] >= 0 else '跌'} "
+        f"{abs(top['暴露β']):.2f}%。"
+        "方法：组合日收益对可投资指数/ETF 的多元回归（Fama-French 思路的可投资化近似），"
+        "反映风格暴露而非真实持仓穿透。")
 
 
 def mc_fan_chart(fan: pd.DataFrame, title="蒙特卡洛模拟：未来 1 年净值分布",

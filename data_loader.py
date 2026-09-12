@@ -307,9 +307,9 @@ def _fetch_alphavantage(ticker: str) -> pd.Series:
     return s
 
 
-_SOURCE_NAMES = {"yahoo": "Yahoo Finance", "tencent": "腾讯财经",
-                 "sina_cn": "新浪财经", "sina_us": "新浪财经",
-                 "alphavantage": "Alpha Vantage"}
+_SOURCE_NAMES = {"yahoo": "Yahoo Finance（复权）", "tencent": "腾讯财经（前复权）",
+                 "sina_cn": "新浪财经（不复权）", "sina_us": "新浪财经（不复权）",
+                 "alphavantage": "Alpha Vantage（不复权）"}
 
 
 def _fetch_fallback(ticker: str) -> pd.Series:
@@ -368,7 +368,7 @@ def fetch_close_batch(tickers: tuple[str, ...]) -> dict[str, pd.Series]:
                 s = close[t].dropna()
                 if not s.empty:
                     out[t] = _normalize_series(s, t)
-                    _SOURCE_USED[t] = "Yahoo Finance"
+                    _SOURCE_USED[t] = _SOURCE_NAMES["yahoo"]
     # 备用源兜底：逐个补齐 Yahoo 没拉到的资产
     for t in tickers:
         if t not in out:
@@ -458,6 +458,12 @@ def load_prices(tickers: list[str], progress=None):
     if dropped_align:
         quality.append("、".join(dropped_align)
                        + " 的数据日期与其他资产无法对齐，已从本次计算中剔除，请刷新重试")
+    # 复权口径提示：不复权来源的分红送转会体现为价格跳空，收益略有失真
+    unadj = [t for t in prices.columns if "不复权" in _SOURCE_USED.get(t, "")]
+    if unadj:
+        quality.append("、".join(unadj)
+                       + " 来自不复权数据源（分红送转体现为价格跳空，长期收益略有失真），"
+                         "其余资产均为复权数据")
     for t in prices.columns:
         col = raw[t]
         fv = col.first_valid_index()
