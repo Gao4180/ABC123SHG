@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
+.smoke_*
+dev.bat
+run_dev.py
+package.json
+package-lock.json
+node_modules/
+smoke_test.py

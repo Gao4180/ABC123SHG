@@ -1,0 +1,71 @@
+# 个人财富管理配置器 · 配置文件
+# 改这里即可调整资产池和优化规则，不用动代码
+
+risk_free_rate: 0.02        # 无风险利率（年化）
+weight_cap: 0.4             # 单资产默认权重上限（KYC 定级后会再收紧）
+shrinkage: true             # 协方差矩阵 Ledoit-Wolf 收缩
+monte_carlo_paths: 2000     # 蒙特卡洛模拟路径数
+mc_method: bootstrap        # 蒙特卡洛方法：bootstrap=历史残差自助法(肥尾) / gbm=正态假设
+jump_sigma: 5               # 数据质量：单日涨跌超过 N 倍波动率视为跳跃
+missing_warn_ratio: 0.05    # 数据质量：缺失交易日占比超过该值时提示
+trade_cost_bps: 5           # 单边交易成本（万分之 5，回测/调仓估算用）
+bl_tau: 0.05                # Black-Litterman 先验缩放系数
+bl_view_shrink: 0.5         # 择时观点强度：跌破均线的资产预期收益向无风险利率收缩的比例
+alphavantage_api_key: ""    # 可选：Alpha Vantage 免费 key（alphavantage.co 注册），填后作为美股最后备用源
+
+# 压力测试情景（用真实历史区间重放）
+stress_scenarios:
+  - name: 2020年3月疫情崩盘
+    start: "2020-02-19"
+    end: "2020-03-23"
+  - name: 2022年股债双杀
+    start: "2022-01-03"
+    end: "2022-10-24"
+  - name: 2025年4月关税冲击
+    start: "2025-04-02"
+    end: "2025-04-08"
+
+# ---------- 模式二资产池 ----------
+# 字段：ticker 代码 / name 具体产品名 / desc 一句话说明 / role 角色
+#   role ∈ equity(股票) bond(债券) gold(黄金) commodity(商品) hedge(对冲) cash(现金类)
+#   risk = 产品风险等级 R1(低)~R5(高)，用于 KYC 适当性匹配
+#   fee  = 年管理费率（约值，供费用估算）
+#   exp_return 可选：前瞻性年化收益假设，覆盖历史均值（Black-Litterman 之前的基准）
+
+asset_pool:                  # 美股 ETF 池（美元资产）
+  - {ticker: SHV,  role: cash,      risk: 1, fee: 0.0015, category: 现金类,
+     name: iShares 0-1年短期国债 ETF（SHV）, desc: 美国超短期国库券，接近现金管理，波动极小}
+  - {ticker: BND,  role: bond,      risk: 2, fee: 0.0003, category: 债券,
+     name: 先锋美国综合债券 ETF（BND）, desc: 一篮子美国投资级国债+企业债，跟踪彭博综合债券指数}
+  - {ticker: TLT,  role: bond,      risk: 3, fee: 0.0015, category: 债券,
+     name: iShares 20年以上长期国债 ETF（TLT）, desc: 美国超长期国债，降息周期弹性大，加息时回撤也大}
+  - {ticker: GLD,  role: gold,      risk: 3, fee: 0.0040, category: 黄金,
+     name: SPDR 黄金 ETF（GLD）, desc: 直接持有实物黄金金条，跟踪伦敦金价，危机避险首选}
+  - {ticker: QAI,  role: hedge,     risk: 3, fee: 0.0077, category: 对冲基金复制,
+     name: 对冲基金多策略复制 ETF（QAI）, desc: 用公开市场工具复制对冲基金多策略收益，个人可直接买}
+  - {ticker: HDG,  role: hedge,     risk: 3, fee: 0.0095, category: 对冲基金复制,
+     name: ProShares 对冲基金复制 ETF（HDG）, desc: 复制对冲基金多空策略，与真实对冲基金存在跟踪差异}
+  - {ticker: DBC,  role: commodity, risk: 4, fee: 0.0085, category: 大宗商品,
+     name: 景顺综合商品指数 ETF（DBC）, desc: 覆盖原油、天然气、黄金、玉米等 14 种商品期货，抗通胀}
+  - {ticker: SPY,  role: equity,    risk: 4, fee: 0.0009, category: 美股大盘,
+     name: SPDR 标普500 ETF（SPY）, desc: 美国 500 家大盘蓝筹，全球最主流的股指 ETF}
+  - {ticker: QQQ,  role: equity,    risk: 5, fee: 0.0020, category: 科技成长,
+     name: 景顺纳斯达克100 ETF（QQQ）, desc: 重仓苹果、微软、英伟达等科技巨头，成长性强波动也大}
+
+asset_pool_cn:               # 国内可买 ETF/QDII 池（人民币资产，A股账户直接买）
+  - {ticker: 511880.SS, role: cash,      risk: 1, fee: 0.0030, category: 现金类,
+     name: 银华交易货币 ETF（511880）, desc: 场内货币基金，T+0 交易，现金管理替代}
+  - {ticker: 511010.SS, role: bond,      risk: 2, fee: 0.0030, category: 债券,
+     name: 国泰上证5年期国债 ETF（511010）, desc: 跟踪上证 5 年期国债指数，利率债低波动}
+  - {ticker: 518880.SS, role: gold,      risk: 3, fee: 0.0050, category: 黄金,
+     name: 华安黄金 ETF（518880）, desc: 跟踪国内 Au99.99 金价，人民币计价避险资产}
+  - {ticker: 510880.SS, role: equity,    risk: 4, fee: 0.0050, category: A股红利,
+     name: 华泰柏瑞红利 ETF（510880）, desc: 上证红利指数，高分红低估值蓝筹，防御型股票}
+  - {ticker: 510300.SS, role: equity,    risk: 4, fee: 0.0015, category: A股大盘,
+     name: 华泰柏瑞沪深300 ETF（510300）, desc: 跟踪沪深300，A股核心资产代表}
+  - {ticker: 513500.SS, role: equity,    risk: 4, fee: 0.0060, category: 美股QDII,
+     name: 博时标普500 ETF（513500）, desc: 人民币买标普500，无需美股账户，注意 QDII 溢价}
+  - {ticker: 159915.SZ, role: equity,    risk: 5, fee: 0.0015, category: 创业板,
+     name: 易方达创业板 ETF（159915）, desc: 创业板指数，成长风格，波动显著大于沪深300}
+  - {ticker: 513100.SS, role: equity,    risk: 5, fee: 0.0080, category: 美股QDII,
+     name: 国泰纳斯达克100 ETF（513100）, desc: 人民币买纳斯达克100，高成长高波动，注意溢价}
