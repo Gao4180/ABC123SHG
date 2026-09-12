@@ -2,7 +2,7 @@
 """
 模式二：财富方案推荐
 基于 config.yaml 的资产池（美股 ETF / 国内 ETF·QDII 可选，含产品风险等级），
-自动生成 4 套经典方案并横向对比。KYC 定级后自动做适当性过滤。
+自动生成 4 套经典方案并横向对比。KYC 定级后做适当性提示（只警示不剔除）。
 """
 from __future__ import annotations
 
@@ -97,21 +97,25 @@ def render():
     st.caption("说明：总金额只影响每套方案的「配置金额」换算，不会改变配置比例——"
                "比例由资产间的风险收益结构和你的 KYC 等级决定。")
 
-    # ---------- 适当性过滤 ----------
+    # ---------- 适当性提示：KYC 只警示不剔除，资产池内产品全部参与方案生成 ----------
     max_risk = kyc_result["rules"]["max_risk"] if kyc_result else 5
-    pool_ok = [p for p in pool if p.get("risk", 5) <= max_risk]
-    blocked = [p for p in pool if p.get("risk", 5) > max_risk]
-    if kyc_result:
+    over_risk = [p for p in pool if p.get("risk", 5) > max_risk]
+    if kyc_result and over_risk:
+        st.warning(
+            f"⚠️ 适当性提示：按你的测评结果（{kyc_result['rules']['label']}），"
+            f"以下产品风险等级超过 R{max_risk}："
+            + "、".join(f"{p['ticker']}（{p.get('name', '')}，R{p.get('risk', '?')}）"
+                        for p in over_risk)
+            + "。已按你的要求保留并继续参与方案生成，请知悉其波动可能超出你的风险承受能力。")
+    elif kyc_result:
         st.info(f"你的风险测评为 {kyc_result['rules']['label']}，"
-                f"按适当性规则可持有 R1~R{max_risk} 产品。")
-        for p in blocked:
-            st.warning(f"已剔除 {p['ticker']}（{p.get('name','')}，R{p['risk']}）："
-                       f"超过你的风险承受等级。")
-    elif blocked:
-        st.caption("完成左侧「风险测评（KYC）」后，超出你风险等级的产品将被自动剔除。")
+                f"当前资产池产品均在 R1~R{max_risk} 适当性范围内。")
+    elif over_risk:
+        st.caption("完成左侧「风险测评（KYC）」后，超出你风险等级的产品会显示适当性提示（不会剔除）。")
+    pool_ok = pool
 
     if len(pool_ok) < 3:
-        st.error("按你的风险等级过滤后可用资产不足 3 个，无法生成方案。")
+        st.error("资产池内可用资产不足 3 个，无法生成方案。")
         return
 
     names = {p["ticker"]: p.get("name", p["ticker"]) for p in pool}

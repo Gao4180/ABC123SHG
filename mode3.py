@@ -70,9 +70,18 @@ def render():
     eq_cap = EQUITY_CAP_BY_LEVEL[level]
     max_risk = kyc.LEVEL_RULES[level]["max_risk"]
 
-    pool = [p for p in cfg["asset_pool_cn"] if p.get("risk", 5) <= max_risk]
+    # ---------- 适当性提示：KYC 只警示不剔除，资产池内产品全部参与规划 ----------
+    pool = list(cfg["asset_pool_cn"])
+    over_risk = [p for p in pool if p.get("risk", 5) > max_risk]
+    if over_risk:
+        st.warning(
+            f"⚠️ 适当性提示：按你的测评等级（{kyc.LEVEL_RULES[level]['label']}），"
+            f"以下产品风险等级超过 R{max_risk}："
+            + "、".join(f"{p['ticker']}（{p.get('name', '')}，R{p.get('risk', '?')}）"
+                        for p in over_risk)
+            + "。已按你的要求保留并继续参与规划，请知悉其波动可能超出你的风险承受能力。")
     if len(pool) < 3:
-        st.error("按你的风险等级过滤后可用资产不足 3 个。")
+        st.error("资产池内可用资产不足 3 个。")
         return
     names = {p["ticker"]: p.get("name", p["ticker"]) for p in pool}
     tickers = [p["ticker"] for p in pool]
