@@ -18,23 +18,42 @@ import optimizer as opt
 from data_loader import annualized_stats, load_config, pool_meta, portfolio_nav
 from report import RF, load_with_progress, mc_fan_chart, nav_chart
 
-GOAL_PRESETS = ["退休养老", "子女教育", "购房首付", "旅游基金", "自定义"]
+GOAL_PRESETS = ["退休养老", "提前退休/FIRE", "子女教育", "子女婚嫁", "购房首付",
+                "买车", "旅游基金", "创业基金", "大病医疗储备", "应急备用金",
+                "财富传承", "自定义"]
 
 # KYC 等级 → 股票占比上限（适当性约束 glide path）
-EQUITY_CAP_BY_LEVEL = {1: 0.0, 2: 0.10, 3: 0.30, 4: 0.60, 5: 1.0}
+# 注意：上限过低会把不同目标类型的差异压平（都曾封顶 30% 导致配置雷同），
+# 因此 C3 给 50%，差异主要靠目标类型系数体现
+EQUITY_CAP_BY_LEVEL = {1: 0.0, 2: 0.15, 3: 0.50, 4: 0.75, 5: 1.0}
 
-# 目标类型 → 风险预算：eq_bias 乘在标准下滑轨道上（用钱刚性越强越保守）
+# 目标类型 → 风险预算：eq_bias 乘在标准下滑轨道上（用钱刚性越强越保守），
+# default_years 为该类型的典型期限（表单默认值，可改）
 GOAL_PROFILES = {
-    "退休养老": {"eq_bias": 1.0,
-                 "note": "期限长、可承受波动，股票占比按标准下滑轨道"},
-    "子女教育": {"eq_bias": 0.8,
-                 "note": "用钱时间刚性，临近截止不能亏，轨道比养老更保守"},
-    "购房首付": {"eq_bias": 0.5,
-                 "note": "有明确截止日、本金安全优先，股票占比约为标准轨道的一半"},
-    "旅游基金": {"eq_bias": 0.4,
-                 "note": "短期享乐目标，以稳健为主"},
-    "自定义":   {"eq_bias": 0.9,
-                 "note": "按略低于标准轨道的折中处理"},
+    "退休养老":   {"eq_bias": 1.0, "default_years": 20,
+                   "note": "期限长、可承受波动，股票占比按标准下滑轨道"},
+    "提前退休/FIRE": {"eq_bias": 1.0, "default_years": 15,
+                   "note": "超长期增值目标，股票占比按标准轨道，更强调抗通胀"},
+    "子女教育":   {"eq_bias": 0.8, "default_years": 10,
+                   "note": "用钱时间刚性，临近截止不能亏，轨道比养老更保守"},
+    "子女婚嫁":   {"eq_bias": 0.7, "default_years": 8,
+                   "note": "中期目标，时间较刚性，略保守于教育金"},
+    "购房首付":   {"eq_bias": 0.5, "default_years": 3,
+                   "note": "有明确截止日、本金安全优先，股票占比约为标准轨道的一半"},
+    "买车":       {"eq_bias": 0.4, "default_years": 2,
+                   "note": "短期消费目标，稳健为主"},
+    "旅游基金":   {"eq_bias": 0.4, "default_years": 2,
+                   "note": "短期享乐目标，以稳健为主"},
+    "创业基金":   {"eq_bias": 0.6, "default_years": 5,
+                   "note": "中期目标且金额弹性较大，可承受一定波动"},
+    "大病医疗储备": {"eq_bias": 0.3, "default_years": 5,
+                   "note": "随时可能要用，稳健优先，股票占比低"},
+    "应急备用金": {"eq_bias": 0.1, "default_years": 1,
+                   "note": "流动性第一，几乎全配债券/货币类"},
+    "财富传承":   {"eq_bias": 1.0, "default_years": 25,
+                   "note": "超长期、跨代目标，可穿越周期，股票占比最高"},
+    "自定义":     {"eq_bias": 0.9, "default_years": 10,
+                   "note": "按略低于标准轨道的折中处理"},
 }
 
 
@@ -114,7 +133,10 @@ def render():
                 "目标名称（可改）",
                 value=gname_preset if gname_preset != "自定义" else "我的目标",
                 key=f"goal_name_{gname_preset}")
-            g_years = st.number_input("距目标期限（年）", 0.5, 30.0, 10.0, 0.5)
+            g_years = st.number_input(
+                "距目标期限（年）", 0.5, 30.0,
+                float(GOAL_PROFILES[gname_preset]["default_years"]), 0.5,
+                key=f"goal_years_{gname_preset}")
         with c2:
             g_target = st.number_input("目标金额（元）", 10000.0, 1e8, 500000.0, 10000.0)
             g_start = st.number_input("目前已投入（元）", 0.0, 1e8, 50000.0, 10000.0)
