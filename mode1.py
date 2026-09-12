@@ -166,20 +166,17 @@ def render():
         st.error("有效资产不足 2 个，无法优化。请检查代码后重新点击「开始计算」。")
         return
 
-    # ---------- 适当性匹配：KYC 等级限制可买产品 ----------
+    # ---------- 适当性提示：KYC 只警示不剔除，用户输入的资产一律参与分析 ----------
     if kyc_result:
         max_risk = kyc.LEVEL_RULES[kyc_result["level"]]["max_risk"]
-        blocked = [t for t in prices.columns
-                   if meta.get(t, {}).get("risk", 5) > max_risk]
-        if blocked:
-            prices = prices.drop(columns=blocked)
-            st.warning(f"适当性匹配：{kyc.LEVEL_RULES[kyc_result['level']]['label']} "
-                       f"客户不应持有 R{max_risk} 以上产品，已剔除："
-                       + "、".join(f"{t}（R{meta.get(t, {}).get('risk', '?')}）"
-                                   for t in blocked))
-        if len(prices.columns) < 2:
-            st.error("剔除不合规产品后剩余资产不足 2 个，请调整输入或重新测评。")
-            return
+        over_risk = [t for t in prices.columns
+                     if meta.get(t, {}).get("risk", 5) > max_risk]
+        if over_risk:
+            st.warning(
+                f"⚠️ 适当性提示：按你的测评结果（{kyc.LEVEL_RULES[kyc_result['level']]['label']}），"
+                f"以下产品风险等级超过 R{max_risk}："
+                + "、".join(f"{t}（R{meta.get(t, {}).get('risk', '?')}）" for t in over_risk)
+                + "。已按你的要求保留并继续分析，请知悉其波动可能超出你的风险承受能力。")
 
     # ---------- 参数估计 ----------
     cap = min(st.session_state.get("weight_cap", cfg["weight_cap"]),

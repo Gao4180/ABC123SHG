@@ -120,7 +120,7 @@ assert any("目标达成概率" in (m.label or "") for m in at3.metric)
 caps3 = " ".join(c.value or "" for c in at3.caption)
 assert "下滑轨道" in caps3
 
-print("\n== KYC 适当性过滤：C2 客户输入含 R3+ 产品的组合（回归：长度不匹配 bug） ==")
+print("\n== KYC 适当性提示：C2 客户输入含 R3+ 产品的组合（只警示不剔除，照常分析） ==")
 at4 = AppTest.from_file("app.py", default_timeout=180)
 at4.run()
 # 答 KYC：q0-q4 默认第1项（各1分），q5-q7 分别选 3/3/4 分 → 总分 15 → C2
@@ -139,5 +139,7 @@ print("警告:", warns4)
 assert any("适当性" in w for w in warns4)
 caps4 = " ".join(c.value or "" for c in at4.caption)
 assert "C2 稳健型" in caps4 or any("C2 稳健型" in (m.value or "") for m in list(at4.info) + list(at4.warning))
+# 超风险产品不再被剔除：优化结果照常输出
+assert any("预期年化收益" in (m.label or "") for m in at4.metric), "超风险产品被剔除或结果未渲染"
 
 print("\n界面级验证全部通过 ✔")
