@@ -58,6 +58,8 @@ def goal_simulation(hist_rets, start_amount: float, monthly_contrib: float,
     days = int(TRADING_DAYS * years)
     pool = np.asarray(hist_rets, dtype=float)
     pool = pool[np.isfinite(pool)]
+    if pool.size == 0:
+        raise ValueError("历史收益数据为空，无法模拟，请检查数据源后重试")
     daily = rng.choice(pool, size=(days, paths), replace=True)
     nav = np.full(paths, float(start_amount))
     curve = np.empty((days + 1, paths))

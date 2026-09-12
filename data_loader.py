@@ -188,6 +188,22 @@ def _download_batch(tickers: list[str]) -> pd.DataFrame:
     return yf.download(tickers, **kwargs)
 
 
+def _normalize_series(s: pd.Series, name: str) -> pd.Series:
+    """
+    统一所有数据源的日期索引：去时区、归一到自然日、去除重复日期。
+    Yahoo 返回带时区的 DatetimeIndex，新浪/腾讯是纯日期字符串；
+    不统一的话 concat 横向对齐会产生大量错位空行，ffill+dropna 后整张表被掏空。
+    """
+    idx = pd.to_datetime(s.index)
+    if getattr(idx, "tz", None) is not None:
+        idx = idx.tz_localize(None)
+    s = s.copy()
+    s.index = idx.normalize()
+    s = s[~s.index.duplicated(keep="last")].sort_index()
+    s.name = name
+    return s
+
+
 def _http_get(url: str, headers: dict | None = None, timeout: int = 15):
     """统一 HTTP 入口：优先浏览器伪装会话，退回普通 requests。"""
     if _SESSION is not None:
@@ -304,19 +320,19 @@ def _fetch_fallback(ticker: str) -> pd.Series:
             try:
                 s = fn(ticker)
                 _SOURCE_USED[ticker.upper()] = _SOURCE_NAMES[src]
-                return s
+                return _normalize_series(s, ticker)
             except Exception:
                 continue
     else:
         try:
             s = _fetch_sina_us(ticker)
             _SOURCE_USED[ticker.upper()] = _SOURCE_NAMES["sina_us"]
-            return s
+            return _normalize_series(s, ticker)
         except Exception:
             pass
     s = _fetch_alphavantage(ticker)          # 无 key 时抛错，由上层跳过
     _SOURCE_USED[ticker.upper()] = _SOURCE_NAMES["alphavantage"]
-    return s
+    return _normalize_series(s, ticker)
 
 
 @st.cache_data(ttl=dt.timedelta(hours=12), persist="disk", show_spinner=False)
@@ -351,8 +367,7 @@ def fetch_close_batch(tickers: tuple[str, ...]) -> dict[str, pd.Series]:
             if t in close.columns:
                 s = close[t].dropna()
                 if not s.empty:
-                    s.name = t
-                    out[t] = s
+                    out[t] = _normalize_series(s, t)
                     _SOURCE_USED[t] = "Yahoo Finance"
     # 备用源兜底：逐个补齐 Yahoo 没拉到的资产
     for t in tickers:
@@ -416,13 +431,33 @@ def load_prices(tickers: list[str], progress=None):
     if not series:
         return pd.DataFrame(), [], bad, short, markets, limited, []
 
-    raw = pd.concat(series.values(), axis=1).sort_index()
     # 对齐交易日：不同市场休市日不同，先最多前向填充 5 个交易日，再丢弃仍有空缺的行
+    raw = pd.concat(series.values(), axis=1).sort_index()
     prices = raw.ffill(limit=5).dropna()
+
+    # 打捞逻辑：万一某资产索引格式异常（时区/精度不一致），对齐后会掏空整张表。
+    # 逐列检查，把"导致大面积缺失"的问题列剔除后重试，至少保留 2 列；
+    # 被剔除的资产记入质量提示，让用户知道可以刷新重试。
+    dropped_align: list[str] = []
+    while len(prices) < 60 and raw.shape[1] > 2:
+        miss = raw.isna().mean()
+        worst = miss.idxmax()
+        raw = raw.drop(columns=[worst])
+        dropped_align.append(worst)
+        prices = raw.ffill(limit=5).dropna()
+    if dropped_align:
+        short = [t for t in short if t not in dropped_align]
+
+    if prices.shape[1] < 2 or prices.empty:
+        return pd.DataFrame(), [], todo, short, markets, limited, [
+            "数据源返回的日期格式无法对齐，本次未能生成结果，请稍后刷新重试"]
 
     # 数据质量检查（缺失占比 + 价格跳跃），参数来自 config.yaml
     cfg = load_config()
     quality = []
+    if dropped_align:
+        quality.append("、".join(dropped_align)
+                       + " 的数据日期与其他资产无法对齐，已从本次计算中剔除，请刷新重试")
     for t in prices.columns:
         col = raw[t]
         fv = col.first_valid_index()
@@ -443,7 +478,7 @@ def load_prices(tickers: list[str], progress=None):
             if jumps >= 4:
                 quality.append(f"{t} 检出 {jumps} 次超过 {cfg['jump_sigma']:.0f}σ 的单日剧烈波动，"
                                "次数偏多，可能包含数据源脏数据，建议结合净值图核对")
-    return prices, list(series.keys()), bad, short, markets, limited, quality
+    return prices, list(prices.columns), bad, short, markets, limited, quality
 
 
 def max_drawdown(nav: pd.Series) -> float:
@@ -484,6 +519,9 @@ def drawdown_periods(nav: pd.Series, top_n: int = 3):
 def portfolio_nav(prices: pd.DataFrame, weights: np.ndarray) -> pd.Series:
     """按固定权重（买入持有、每日再平衡近似）计算组合累计净值。"""
     rets = prices.pct_change().dropna()
+    if rets.empty:
+        return pd.Series(dtype=float, name="nav")
+    weights = np.asarray(weights, dtype=float)[: rets.shape[1]]
     port = (rets * weights).sum(axis=1)
     nav = (1 + port).cumprod()
     nav = pd.concat([pd.Series([1.0], index=[rets.index[0] - pd.Timedelta(days=1)]), nav])
