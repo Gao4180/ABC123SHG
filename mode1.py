@@ -175,7 +175,8 @@ def render():
             prices = prices.drop(columns=blocked)
             st.warning(f"适当性匹配：{kyc.LEVEL_RULES[kyc_result['level']]['label']} "
                        f"客户不应持有 R{max_risk} 以上产品，已剔除："
-                       + "、".join(f"{t}（R{meta[t]['risk']}）" for t in blocked))
+                       + "、".join(f"{t}（R{meta.get(t, {}).get('risk', '?')}）"
+                                   for t in blocked))
         if len(prices.columns) < 2:
             st.error("剔除不合规产品后剩余资产不足 2 个，请调整输入或重新测评。")
             return
