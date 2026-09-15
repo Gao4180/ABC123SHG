@@ -9,3 +9,4 @@ requests>=2.32
 pyyaml>=6.0
 curl_cffi>=0.9
 reportlab>=4.0
+supabase>=2.0
