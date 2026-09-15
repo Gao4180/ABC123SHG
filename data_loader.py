@@ -14,8 +14,26 @@ import time
 import numpy as np
 import pandas as pd
 import requests
-import streamlit as st
 import yfinance as yf
+
+try:
+    import streamlit as st
+except Exception:                            # 无 Streamlit 环境（每日体检定时任务等）
+    class _NoStreamlit:
+        """降级垫片：缓存装饰器退化为直接调用，secrets 返回默认值。"""
+
+        @staticmethod
+        def cache_data(*args, **kwargs):
+            def deco(fn):
+                return fn
+            return deco
+
+        class secrets:
+            @staticmethod
+            def get(key, default=None):
+                return default
+
+    st = _NoStreamlit()
 
 try:
     from curl_cffi import requests as _creq   # 浏览器伪装，降低被 Yahoo 限流的概率

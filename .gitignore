@@ -10,3 +10,6 @@ package.json
 package-lock.json
 node_modules/
 smoke_test.py
+holdings.json
+test_report*.pdf
+test_report*.png

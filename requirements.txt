@@ -8,3 +8,4 @@ yfinance>=0.2.50
 requests>=2.32
 pyyaml>=6.0
 curl_cffi>=0.9
+reportlab>=4.0

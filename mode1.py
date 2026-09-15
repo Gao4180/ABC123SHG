@@ -241,6 +241,15 @@ def render():
                               ctx["currency"], fees=fees),
                  width="stretch", hide_index=True)
 
+    # ---------- 买入操作清单（P2：先债后股、先大额后小额） ----------
+    with st.expander("📋 买入操作清单：照着下单的顺序表", expanded=True):
+        import execution
+        plan_df = execution.buy_plan(prices, weights, ctx["total_amount"],
+                                     ctx["currency"], meta, fees=fees)
+        st.dataframe(plan_df, width="stretch", hide_index=True)
+        st.caption("顺序逻辑：先债后股（防御资产先就位，建仓期波动更小），"
+                   "同类中金额大的先买。QDII 注意溢价，高波动品种可分两批。")
+
     col_pie, col_nav = st.columns([1, 2])
     with col_pie:
         st.plotly_chart(pie_chart(prices.columns, weights), width="stretch")
@@ -269,6 +278,63 @@ def render():
                               names=names, key_prefix="m1")
     factor_section(prices, weights, majority_mkt, key_prefix="m1")
 
+    # ---------- 导出 PDF 报告 + 持仓文件（P1/P2） ----------
+    st.subheader("导出与持续跟踪")
+    c_pdf, c_json = st.columns(2)
+    with c_pdf:
+        import datetime as _dt
+        import report_pdf
+        ann_ret, ann_vol, sharpe, mdd = annualized_stats(prices, weights, rf=RF)
+        _rc, _ = analytics.risk_contribution(cov, weights, list(prices.columns))
+        w_rows = [[t, meta.get(t, {}).get("name", t), f"{weights[i]:.1%}",
+                   f"{weights[i] * ctx['total_amount']:,.0f} {ctx['currency']}"]
+                  for i, t in enumerate(prices.columns) if weights[i] >= 0.005]
+        pdf_bytes = report_pdf.build_portfolio_pdf(
+            title=f"个人财富配置分析报告 · {ctx['risk_label'].split('（')[0]}档组合",
+            subtitle=f"总金额 {ctx['total_amount']:,.0f} {ctx['currency']} · "
+                     f"期限 {ctx['horizon']:g} 年",
+            metrics={"预期年化收益": f"{ann_ret:.1%}",
+                     "年化波动": f"{ann_vol:.1%}",
+                     "夏普比率": f"{sharpe:.2f}",
+                     "近5年最大回撤": f"{mdd:.1%}"},
+            weight_rows=w_rows,
+            nav=portfolio_nav(prices, weights),
+            benchmark=bench,
+            rc_df=_rc,
+            analysis_text=auto_analysis(list(prices.columns), weights, prices,
+                                        mu, cov, label="该组合"),
+            extra_notes=["蒙特卡洛前景模拟与压力测试明细见网页版",
+                         "数据复权口径与质量提示见网页版标注"],
+        )
+        st.download_button("📄 下载 PDF 分析报告", data=pdf_bytes,
+                           file_name=f"配置报告_{_dt.date.today()}.pdf",
+                           mime="application/pdf", key="m1_pdf")
+        st.caption("含核心指标、配置表、净值图、风险归因与免责声明，可保存或分享。")
+    with c_json:
+        import json as _json
+        import datetime as _dt2
+        holdings = {
+            "name": f"{ctx['risk_label'].split('（')[0]}档组合",
+            "created_at": str(_dt2.date.today()),
+            "total_amount": ctx["total_amount"],
+            "currency": ctx["currency"],
+            "positions": [
+                {"ticker": t,
+                 "name": meta.get(t, {}).get("name", t),
+                 "target_weight": round(float(weights[i]), 4),
+                 "ref_price": round(float(prices[t].iloc[-1]), 4),
+                 "shares": int(weights[i] * ctx["total_amount"]
+                               // prices[t].iloc[-1])}
+                for i, t in enumerate(prices.columns) if weights[i] >= 0.005],
+        }
+        st.download_button("💾 导出持仓文件（holdings.json）",
+                           data=_json.dumps(holdings, ensure_ascii=False,
+                                            indent=2),
+                           file_name="holdings.json", mime="application/json",
+                           key="m1_holdings")
+        st.caption("把它保存到项目目录 wealth-configurator\\ 下，"
+                   "每日自动体检任务会持续跟踪持仓偏离、回撤与择时信号。")
+
     # ---------- 再平衡提醒（机构纪律：偏离 >5% 触发） ----------
     with st.expander("⚖️ 再平衡检查：输入你当前的实际持仓比例"):
         cur = []
@@ -291,6 +357,27 @@ def render():
                 st.warning(f"{n_adj} 个资产偏离目标超过 5%，建议再平衡回目标比例。")
             else:
                 st.success("持仓未显著偏离目标，无需调仓。")
+
+            # ---------- 新钱智能再平衡（Betterment 式：只买不卖） ----------
+            st.divider()
+            st.markdown("**💰 新钱怎么加：只买不卖的再平衡**")
+            c_v, c_n = st.columns(2)
+            with c_v:
+                port_val = st.number_input("当前持仓总市值（元）", 0.0, 1e9,
+                                           0.0, 10000.0, key="m1_port_val")
+            with c_n:
+                new_money = st.number_input("本次要新增投入（元）", 0.0, 1e8,
+                                            0.0, 5000.0, key="m1_new_money")
+            if port_val > 0 and new_money > 0:
+                import execution
+                alloc_df, leftover = execution.allocate_new_money(
+                    tickers_ok, weights, cur_w, port_val, new_money)
+                st.dataframe(alloc_df, width="stretch", hide_index=True)
+                if leftover > 1:
+                    st.caption(f"买入后剩余 {leftover:,.0f} 元留作现金"
+                               "（当前偏离很小，新钱已足够拉回目标比例）。")
+                st.caption("逻辑：新钱优先补最低配的资产，尽量不靠卖出来再平衡，"
+                           "省手续费也省心理负担（Betterment 的 smart rebalancing 思路）。")
         else:
             st.caption("全部填 0 表示暂不检查。")
 
