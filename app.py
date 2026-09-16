@@ -10,11 +10,15 @@ import kyc
 import mode1
 import mode2
 import mode3
+import tracking
 from data_loader import load_config
 
 st.set_page_config(page_title="个人财富管理配置器", page_icon="💼", layout="wide")
 
 _cfg = load_config()
+
+# ---------- 左侧：策略档案登录（可选，游客可直接使用全部功能） ----------
+tracking.sidebar_login()
 
 # ---------- 左侧：KYC 风险测评 ----------
 kyc_result = kyc.kyc_sidebar_widget()

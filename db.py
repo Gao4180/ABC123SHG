@@ -6,9 +6,15 @@
   页面其余功能不受影响。
 - 6 位数字代码由系统随机分配（SystemRandom），即档案的访问凭证；
   可选口令以 SHA-256 加盐哈希存储，永不保存明文。
+- 档案 = 纯身份；策略与买入记录按模块归属（mode=1/2/3）分别存储，
+  三个模块各自独立恢复、记账、体检（方案 A）。
 - supabase 包为惰性导入：本地测试环境没装也能 import 本模块。
 
-建表 SQL（在 Supabase SQL Editor 执行一次）见仓库 README 或部署指引。
+表结构：
+  profiles(code pk, plan_name, pool, total_amount, pass_hash, created_at)
+    —— 新版档案 plan_name 等字段留空字符串，仅为兼容旧版档案保留
+  buys(id pk, code, mode, ticker, name, amount, buy_date, created_at)
+  strategies(code, mode, payload jsonb, updated_at, pk(code, mode))
 """
 from __future__ import annotations
 
@@ -53,11 +59,10 @@ def _hash_pass(passphrase: str) -> str:
     return hashlib.sha256(("wc-pin$" + passphrase).encode("utf-8")).hexdigest()
 
 
-# ---------------- 档案 ----------------
+# ---------------- 档案（身份） ----------------
 
-def create_profile(plan_name: str, pool_label: str, total_amount: float,
-                   passphrase: str = "") -> str | None:
-    """创建档案，返回系统分配的 6 位数字代码；失败返回 None。"""
+def create_profile(passphrase: str = "") -> str | None:
+    """创建纯身份档案，返回系统分配的 6 位数字代码；失败返回 None。"""
     cli = _client()
     if cli is None:
         return None
@@ -70,9 +75,9 @@ def create_profile(plan_name: str, pool_label: str, total_amount: float,
                 continue
             cli.table("profiles").insert({
                 "code": code,
-                "plan_name": plan_name,
-                "pool": pool_label,
-                "total_amount": float(total_amount),
+                "plan_name": "",           # 旧字段，新版档案不再使用
+                "pool": "",
+                "total_amount": 0,
                 "pass_hash": _hash_pass(passphrase) if passphrase else "",
             }).execute()
             return code
@@ -99,28 +104,53 @@ def check_pass(profile: dict, passphrase: str) -> bool:
     return stored == _hash_pass(passphrase or "")
 
 
-def update_plan(code: str, plan_name: str) -> bool:
+# ---------------- 分模块策略 ----------------
+
+def save_strategy(code: str, mode: int, payload: dict) -> bool:
+    """保存/覆盖某模块的策略配置（upsert）。"""
     cli = _client()
     if cli is None:
         return False
     try:
-        cli.table("profiles").update({"plan_name": plan_name}) \
-           .eq("code", code).execute()
+        cli.table("strategies").upsert({
+            "code": code, "mode": int(mode), "payload": payload,
+        }).execute()
         return True
     except Exception:
         return False
 
 
-# ---------------- 买入记录 ----------------
+def get_strategy(code: str, mode: int) -> dict | None:
+    """读取某模块已保存的策略；旧版档案回退到 profiles 上的方案二字段。"""
+    cli = _client()
+    if cli is None:
+        return None
+    try:
+        r = cli.table("strategies").select("payload") \
+               .eq("code", code).eq("mode", int(mode)).execute()
+        if r.data:
+            return r.data[0].get("payload") or None
+    except Exception:
+        return None
+    if int(mode) == 2:                    # 旧版档案兼容
+        prof = get_profile(code)
+        if prof and prof.get("plan_name"):
+            return {"plan_name": prof["plan_name"], "pool": prof.get("pool", ""),
+                    "total_amount": float(prof.get("total_amount") or 0)}
+    return None
 
-def add_buy(code: str, ticker: str, name: str, amount: float,
+
+# ---------------- 买入记录（按模块） ----------------
+
+def add_buy(code: str, mode: int, ticker: str, name: str, amount: float,
             buy_date: str) -> bool:
     cli = _client()
     if cli is None:
         return False
     try:
         cli.table("buys").insert({
-            "code": code, "ticker": ticker, "name": name,
+            "code": code, "mode": int(mode),
+            "ticker": ticker, "name": name,
             "amount": float(amount), "buy_date": str(buy_date),
         }).execute()
         return True
@@ -128,13 +158,13 @@ def add_buy(code: str, ticker: str, name: str, amount: float,
         return False
 
 
-def list_buys(code: str) -> list[dict]:
+def list_buys(code: str, mode: int) -> list[dict]:
     cli = _client()
     if cli is None:
         return []
     try:
         r = cli.table("buys").select("*").eq("code", code) \
-               .order("buy_date").execute()
+               .eq("mode", int(mode)).order("buy_date").execute()
         return r.data or []
     except Exception:
         return []

@@ -92,6 +92,17 @@ def render():
                "用马科维茨均值-方差模型算出最优配置比例。"
                "提交后随意拖动滑块、改假设，页面不会再跳回初始状态。")
 
+    # ---------- 档案：自动恢复已保存的策略 ----------
+    import db as _db
+    import tracking as _tracking
+    _code = st.session_state.get("pin_code")
+    if _code and st.session_state.get("m1_ctx") is None and _db.available():
+        _saved = _db.get_strategy(_code, 1)
+        if _saved:
+            st.session_state["m1_ctx"] = _saved
+            st.toast("已从档案自动恢复你保存的策略")
+            st.rerun()
+
     # ---------- 输入区（表单） ----------
     with st.form("optimize_form"):
         tickers_raw = st.text_input(
@@ -334,6 +345,21 @@ def render():
                            key="m1_holdings")
         st.caption("把它保存到项目目录 wealth-configurator\\ 下，"
                    "每日自动体检任务会持续跟踪持仓偏离、回撤与择时信号。")
+
+    # ---------- 档案：保存策略 + 记账体检 ----------
+    if _code:
+        if st.button("💾 保存当前策略到档案（下次进入自动恢复）",
+                     key="m1_save_strategy"):
+            if _db.save_strategy(_code, 1, dict(ctx)):
+                st.success("已保存到档案。")
+            else:
+                st.error("保存失败：云端暂时不可用。")
+    _tracking.render_archive(
+        _code, mode=1,
+        target_map={t: float(weights[i]) for i, t in enumerate(prices.columns)
+                    if weights[i] >= 0.005},
+        prices=prices, names=names, product_tickers=list(prices.columns),
+        total_plan=ctx["total_amount"], key_prefix="m1_arch")
 
     # ---------- 再平衡提醒（机构纪律：偏离 >5% 触发） ----------
     with st.expander("⚖️ 再平衡检查：输入你当前的实际持仓比例"):

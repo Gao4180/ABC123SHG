@@ -124,6 +124,17 @@ def render():
     # ---------- 目标清单 ----------
     st.subheader("第一步：添加你的目标")
     st.session_state.setdefault("goals", [])
+
+    # ---------- 档案：自动恢复已保存的目标清单 ----------
+    import db as _db
+    import tracking as _tracking
+    _code = st.session_state.get("pin_code")
+    if _code and _db.available() and not st.session_state["goals"]:
+        _saved3 = _db.get_strategy(_code, 3)
+        if _saved3 and _saved3.get("goals"):
+            st.session_state["goals"] = _saved3["goals"]
+            st.toast("已从档案自动恢复你的目标清单")
+            st.rerun()
     with st.form("goal_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
@@ -163,6 +174,13 @@ def render():
     if st.button("清空全部目标"):
         st.session_state["goals"] = []
         st.rerun()
+    if _code:
+        if st.button("💾 保存目标清单到档案（下次自动恢复）",
+                     key="m3_save_strategy"):
+            if _db.save_strategy(_code, 3, {"goals": goals}):
+                st.success("已保存到档案。")
+            else:
+                st.error("保存失败：云端暂时不可用。")
 
     # ---------- 数据 ----------
     prices, ok, bad, short, _m, _l, _q = load_with_progress(
@@ -180,11 +198,13 @@ def render():
     # ---------- 逐目标输出 ----------
     st.subheader("第二步：每个目标的子组合与达成概率")
     summary = []
+    agg_parts = []                          # (目前已投入, 权重向量) 供整体体检
     for gi, g in enumerate(goals):
         profile = GOAL_PROFILES.get(g.get("type", "自定义"), GOAL_PROFILES["自定义"])
         # 类型决定风险预算：标准下滑轨道 × 类型系数，再受 KYC 股票上限约束
         eq_share = min(glide_equity_share(g["years"]) * profile["eq_bias"], eq_cap)
         w = _goal_weights(mu, cov, tickers_ok, meta_all, eq_share, cap)
+        agg_parts.append((float(g["start"]), w))
         ann_ret, ann_vol, sharpe, mdd = annualized_stats(prices, w, rf=RF)
         port_rets = (prices.pct_change().dropna() * w).sum(axis=1)
         prob, fan, median_final = analytics.goal_simulation(
@@ -230,3 +250,21 @@ def render():
     st.caption("规则：下滑轨道 = 期限越长股票越多（10 年约 60%），临近目标自动转防御；"
                "KYC 等级进一步压低股票占比上限；达成概率用历史收益自助法模拟 "
                f"{cfg['monte_carlo_paths']} 条路径，含每月定投。")
+
+    # ---------- 档案：记账与投后体检（按当前时点滑翔轨道汇总权重） ----------
+    if agg_parts:
+        _tot_start = sum(s for s, _ in agg_parts if s > 0)
+        if _tot_start > 0:
+            _agg = sum(s * w for s, w in agg_parts) / _tot_start
+        else:
+            _agg = np.mean([w for _, w in agg_parts], axis=0)
+        _w_map3 = {t: float(_agg[i]) for i, t in enumerate(tickers_ok)
+                   if _agg[i] >= 0.005}
+        st.divider()
+        _tracking.render_archive(
+            _code, mode=3, target_map=_w_map3, prices=prices, names=names,
+            product_tickers=list(_w_map3.keys()), total_plan=_tot_start,
+            key_prefix="m3_arch")
+        st.caption("体检口径：各目标子组合按「目前已投入」金额加权，"
+                   "合成当前时点的目标配置——滑翔轨道会随期限缩短自动转防御，"
+                   "目标权重也会随之变化，这是规划的正常演进而非漂移。")
