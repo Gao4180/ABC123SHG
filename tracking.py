@@ -46,19 +46,27 @@ def sidebar_login() -> str | None:
             p = st.text_input("口令（未设置则留空）", type="password",
                               key="pin_login_pass")
             if st.button("进入我的档案", key="pin_enter"):
-                prof = db.get_profile(c.strip())
+                try:
+                    prof = db.get_profile(c.strip())
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"云端访问异常：{type(e).__name__}: {e}")
+                    prof = None
                 if prof and db.check_pass(prof, p):
                     st.session_state["pin_code"] = c.strip()
                     st.rerun()
                 elif prof:
                     st.error("口令不正确。")
-                else:
+                elif prof is None and c.strip():
                     st.error("代码不存在，请核对后重试。")
         with t_new:
             p2 = st.text_input("设置口令（可选，留空则只凭代码进入）",
                                type="password", key="pin_new_pass")
             if st.button("创建档案并分配代码", key="pin_create"):
-                new_code = db.create_profile(p2)
+                try:
+                    new_code = db.create_profile(p2)
+                except Exception as e:  # noqa: BLE001
+                    new_code = None
+                    st.error(f"创建异常：{type(e).__name__}: {e}")
                 if new_code:
                     st.session_state["pin_code"] = new_code
                     st.rerun()
